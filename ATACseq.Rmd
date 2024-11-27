@@ -1,0 +1,139 @@
+---
+title: "ATAC-seq"
+author: "Mainak Dutta"
+date: "2024-02-08"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE)
+```
+
+
+```{r Loading Packages}
+
+library(ggplot2)
+library(EnhancedVolcano)
+library(ChIPseeker)
+library(EnsDb.Hsapiens.v86)
+library(org.Hs.eg.db)
+library(annotables)
+library(dplyr)
+library(GenomicRanges)
+library(GenomicTools.fileHandler)
+
+```
+
+
+```{r Working Directory}
+setwd('E:/COGIT')
+proc_data = read.delim2('COGIT_atacseq-DMSO_vs_HU-differential_peaks.tsv')
+head(proc_data)
+```
+
+
+
+## PLOTS
+
+```{r, fig.dim=c(8, 6)}
+proc_data$Fold = as.numeric(proc_data$Fold)
+proc_data$FDR = as.numeric(proc_data$FDR)
+
+
+
+vol = EnhancedVolcano(proc_data, lab = row.names(proc_data), x = 'Fold', y = 'FDR',
+                ylim = c(0, 120), xlim = c(-5, 5), pCutoff = 0.05, FCcutoff = 1, 
+                subtitle = NULL, legendPosition = 'right',
+                legendIconSize = 4.0, legendLabSize = 12, axisLabSize = 10,
+                legendLabels = c('Not Significant', 'Log2-FC', 'FDR', 'FDR & Log2-FC'))
+
+vol
+```
+
+
+### EXPORTING TO BED FILE
+
+```{r Exporting the dataframe as BED file}
+
+exportBed(proc_data, file = "E:/COGIT/atac_seq.bed")
+
+# Import the BED file as GRanges
+peaks = readPeakFile("atac_seq.bed", as="GRanges")
+
+```
+
+
+
+
+```{r Coverage Plot}
+
+covplot(peaks)
+```
+
+
+
+## ANNOTATION VIA ChIPseeker
+
+```{r Annotation}
+
+peakAnnoList <- annotatePeak(peak = peaks, TxDb = EnsDb.Hsapiens.v86, verbose = FALSE)
+
+peakAnnoList
+```
+
+
+### ANNOTATION PLOTS
+
+```{r Annotation Plots}
+
+plotAnnoPie(peakAnnoList)
+plotAnnoBar(peakAnnoList)
+plotDistToTSS(peakAnnoList)
+```
+
+
+### RETRIEVING GENE SYMBOLS
+
+```{r}
+
+# Select the peaks found over promoter regions
+peaks_prom = peakAnnoList@anno$geneId[which(peakAnnoList@detailGenomicAnnotation$Promoter)]
+ensemblID = peaks_prom
+
+peaks_prom = as.data.frame(peaks_prom)
+colnames(peaks_prom) = "geneIDs"
+
+# Map the list of promoters to retrieve gene symbols for their ENSEMBL IDs
+peaks_prom = mapIds(org.Hs.eg.db, keys = peaks_prom$geneIDs, keytype = "ENSEMBL", column = "SYMBOL", multiVals = "first")
+
+
+peaks_prom = as.data.frame(peaks_prom)
+colnames(peaks_prom) = "Gene_SYMBL"
+peaks_prom$GeneIDs = ensemblID
+
+head(peaks_prom)
+```
+
+## COMPARE WITH RNAseq DATA
+
+```{r}
+
+# Read the up-regulated genes file from RNAseq analysis
+upreg_RNAseq = read.csv2("E:/COGIT/upreg_RNAseq.csv")
+
+# GeneIDs present in both dataframes
+temp = which(upreg_RNAseq$GeneIDs %in% peaks_prom$GeneIDs)
+
+# The following genes are found to be upregulated from RNAseq and also have upregulated ATACseq peaks at their promoters
+final_res = upreg_RNAseq[temp,]
+head(final_res)
+```
+
+
+### NOTE: NAs PRESENT IN "GENE_SYMBL" DATA
+
+```{r}
+
+length(which(is.na(final_res$Gene_SYMBL)==TRUE))
+```
+
